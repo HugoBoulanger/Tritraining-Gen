@@ -4,7 +4,7 @@ from typing import Dict, List, Text, Union
 import pandas as pd
 import torch
 from datasets import load_metric
-from pytorch_lightning.metrics import Metric
+from torchmetrics import Metric
 from seqeval.metrics import classification_report
 
 # MIT License
@@ -36,7 +36,7 @@ from dataset import LabelEncoding
 UNIQUE_RUN_ID = str(uuid.uuid4())
 
 
-def cat_labels(old: List[List[Text]], new: List[List[Text]]) -> List[List[Text]]:
+def cat_labels(old: List[torch.TensorType], new: List[torch.TensorType]) -> List[torch.TensorType]:
     """
     Custom concatenation of lists to keep the
     state of the metric as lists of lists.
@@ -80,32 +80,37 @@ class SlotF1(Metric):
         # Get hard predictions
         predictions = torch.argmax(predictions, dim=-1)
         # Transform to list since it needs to deal with different sequence lengths
-        predictions = predictions.tolist()
-        targets = targets.tolist()
+        predictions = [p.to('cpu') for p in predictions]
+        targets = [t.to('cpu') for t in targets]
         # Remove ignored predictions (special tokens and possibly subtokens)
-        true_predictions = [
-            [self.encoding.get_slot_label_name(p) for (p, l) in zip(pred, label) if l != self.ignore_index]
-            for pred, label in zip(predictions, targets)
-        ]
-        true_targets = [
-            [self.encoding.get_slot_label_name(l) for (p, l) in zip(pred, label) if l != self.ignore_index]
-            for pred, label in zip(predictions, targets)
-        ]
+
         # Add predictions and labels to current state
-        self.predictions += true_predictions
-        self.targets += true_targets
+        self.predictions += predictions
+        self.targets += targets
 
     def compute(self) -> Union[torch.Tensor, Dict]:
         """
         Compute the Slot F1 score using the current state.
         """
-        results = self.seqeval.compute(predictions=self.predictions, references=self.targets)
+        true_predictions = [
+            [self.encoding.get_slot_label_name(p.to('cpu').item()) for (p, l) in zip(pred, label) if l.to('cpu').item() != self.ignore_index]
+            for pred, label in zip(self.predictions, self.targets)
+        ]
+        true_targets = [
+            [self.encoding.get_slot_label_name(l.to('cpu').item()) for (p, l) in zip(pred, label) if l.to('cpu').item() != self.ignore_index]
+            for pred, label in zip(self.predictions, self.targets)
+        ]
+
+        results = self.seqeval.compute(predictions=true_predictions, references=true_targets)
         # overall_precision, overall_recall and overall_accuracy are also available
         f1 = torch.tensor(results["overall_f1"])
+
         if self.compute_report:
             report = classification_report(
-                y_true=self.targets, y_pred=self.predictions, output_dict=True
+                y_true=true_targets, y_pred=true_predictions, output_dict=True
             )
+            #print(pd.DataFrame(report).transpose())
             return {"f1": f1, "report": pd.DataFrame(report).transpose()}
         else:
             return f1
+
