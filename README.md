@@ -6,7 +6,14 @@ This project contains all the scripts and information needed to reproduce the ex
 ## Citation
 
 ```bibtex
-Paper accepted at Deeplo 2022.
+Paper accepted at Deeplo 2022 (bibtex not final).
+@inproceedings{boulanger2022trigen,
+    title={Generating unlabelled data for a tri-training approach in a low resourced NER task},
+    author={Boulanger, Hugo and Lavergne, Thomas and Rosset, Sophie},
+    year={2022}
+}
+
+
 ```
 
 ## Installation
