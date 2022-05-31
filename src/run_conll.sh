@@ -2,7 +2,7 @@
 #SBATCH -C v100-32g
 #SBATCH --gres=gpu:1
 #SBATCH --mem=24G
-# SBATCH --array=0-49
+#SBATCH --array=0-49
 
 for p in ../examples/deeplo_conll_avg/logs/*
 do

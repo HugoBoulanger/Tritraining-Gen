@@ -6,7 +6,7 @@ This project contains all the scripts and information needed to reproduce the ex
 ## Citation
 
 ```bibtex
-Paper under review.
+Paper accepted at Deeplo 2022.
 ```
 
 ## Installation
@@ -75,71 +75,48 @@ seqeval_path: '/path/to/seqeval.py'
 
 ## Run the experiments
 
-To run an experiment, first add your `config.yml` to a new directory.
+The experiments with the configurations used for Deeplo 2022 can be found in ~/examples.
+First build the experiments using the next command from the ~/src directory
 
-All experiments were run using seeds `0`, `100`, `200`, `300` and `400`.
-You can set the seed by modifying `train.seed` in the config file.
-
-For experiments the evaluation results are saved as a report to 
-`<path_to_config.yml>/logs/slot_filling_report_test_<LANG>.csv`.
-
-### Joint Transfer
-
-To train the model on one language only (monolingual), set the `train.languages` parameter in the config file as a list
-with the corresponding language code.
-
-E.g. to train the model on English:
-```yaml
-train:
-    languages: ['EN']
 ```
-
-To train the model on a selection of languages at once (multilingual), fill the list with the associated language codes.
-
-Then for both experiments, run the following:
-```shell script
-python train_iid.py --dir path/to/config.yml/directory
+python make_tri_training.py ../examples/name_of_the_experiment ./default_config.yml 
 ```
+To run the CoNLL and I2B2 experiments on SLURM use the ~/src/run_conll.sh and ~/run_i2b2.sh scripts.
 
-### Continual experiments
-
-The model is trained on the sequence of languages specified in the config file under the `train.languages` parameter 
-(describing the order in which the languages are learnt).
-
-The list of sequences used to report our results can be found in `sequences_backward.lst` and 
-`sequences_forward.lst`.
-
-Summary of each continual experiment:
-
-| experiment's name       | sequences used                     | value(s) used from `P`  |
-| ----------------------- | ---------------------------------- | ----------------------- |
-| Forward Transfer (FT)   | `sequences_forward_transfer.lst`   | `P_{L,L}`               |
-| Backward Transfer (BT)  | `sequences_backward_transfer.lst`  | `P_{1,L}`               |
-| Language Position FT    | `sequences_forward_transfer.lst`   | `P_{i, i}`              |
-| Language Position BT    | `sequences_backward_transfer.lst`  | `P_{1, i}`              |
-| Zero-shot               | `sequences_backward_transfer.lst`  | `P_{i, 1}`              |
-
-To run a continual experiment:
-```shell script
-python train_continual.py --dir path/to/config.yml/directory
-```
-
-
-### Fast Recovery
-
-To get the associated results, we used the model checkpoints obtained from the continual experiments on 
-`sequences_backward_transfer.lst` sequences.
-
-To run a fast recovery experiment:
-```shell script
-python train_iid.py --dir path/to/config.yml/directory --from_ckpt --epochs <num_epochs>
-```
-
-The checkpoint saved during training in the directory containing the config file of the continual experiment will be 
-automatically found if it exists.
 
 
 ## License
+
+Licence of current modifications
+
+```
+MIT License
+
+Copyright (c) 2022 Université Paris-Saclay
+Copyright (c) 2022 Laboratoire Interdisciplinaire des Sciences du Numérique (LISN)
+Copyright (c) 2022 CNRS
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+
+Licence of initial repo
 
 ```
 MIT License
