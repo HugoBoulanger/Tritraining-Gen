@@ -28,7 +28,7 @@ from typing import Tuple, Union, Dict, Text, List, Any, Optional
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from pytorch_lightning.metrics import Accuracy
+from torchmetrics import Accuracy
 from transformers import BertModel, PreTrainedTokenizerBase, BertTokenizerFast
 
 from dataset import MultiATIS
@@ -45,7 +45,7 @@ def MultiBERTTokenizer(cfg: Config) -> PreTrainedTokenizerBase:
     return BertTokenizerFast.from_pretrained(cfg.model.name_or_path)
 
 
-@dataclass
+@dataclass(eq=False)
 class ModelOutput:
     """
     Contains useful tensors coming from the model
@@ -81,7 +81,8 @@ class MultiBERTForNLU(pl.LightningModule):
     def __init__(self, dataset: MultiATIS, config: Config):
         super().__init__()
         self.cfg = config
-        self.hparams = self.cfg.train.to_dict()
+        for key in self.cfg.train.to_dict().keys():
+            self.hparams[key] = self.cfg.train.to_dict()[key]
 
         # Load encoder
         self.bert = BertModel.from_pretrained(self.cfg.model.name_or_path)
@@ -120,7 +121,7 @@ class MultiBERTForNLU(pl.LightningModule):
         return SlotF1(
             dataset.label_encoding,
             self.cfg.dataset.ignore_index,
-            name_or_path=self.cfg.seqeval_path,
+            name_or_path=str(self.cfg.model.seqeval_path),
             compute_report=report
         )
 
@@ -195,6 +196,8 @@ class MultiBERTForNLU(pl.LightningModule):
         loss, slot_loss, intent_loss = self._get_losses(self(batch), batch)
         # TODO this logging might not be safe in data parallel mode
         self._log_losses(loss, slot_loss, intent_loss, stage='train')
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         return loss
 
     def validation_step(self, batch: Dict, batch_idx: int):
@@ -203,7 +206,7 @@ class MultiBERTForNLU(pl.LightningModule):
 
         # Slot filling
         slot_preds, intent_preds = output.get_predictions()
-        self.val_slot_f1(slot_preds, batch['slot_labels'])
+        self.val_slot_f1.update(slot_preds, batch['slot_labels'])
         # TODO this logging might not be safe in data parallel mode
         self.log("dev_slot_f1", self.val_slot_f1, on_step=False, on_epoch=True)
 
@@ -223,7 +226,7 @@ class MultiBERTForNLU(pl.LightningModule):
 
         # Accumulate performance
         slot_preds, intent_preds = output.get_predictions()
-        self.test_slot_f1(slot_preds, batch['slot_labels'])
+        self.test_slot_f1.update(slot_preds, batch['slot_labels'])
         if self.cfg.train.do_intent_detection:
             self.test_intent_acc(intent_preds, batch['intents'])
 
@@ -239,7 +242,7 @@ class MultiBERTForNLU(pl.LightningModule):
         }
         if self.cfg.train.do_intent_detection:
             perf["intent_accuracy"] = self.test_intent_acc.compute()  # torch.Tensor
-        return perf
+        self.log('test_f1', slot_perf['f1'])
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)

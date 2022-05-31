@@ -49,7 +49,7 @@ def read_atis_tsv(file: Path, remove_bad_alignments: bool, lower: bool = False) 
     :return:
         DataFrame with utterances and labels
     """
-    data = pd.read_csv(file, sep='\t', usecols=['utterance', 'slot_labels', 'intent'])
+    data = pd.read_csv(file, sep='\t', usecols=['utterance', 'slot_labels', 'intent'], encoding='utf-8')
     data.slot_labels = data.slot_labels.map(lambda xs: xs.split(' '))
     if remove_bad_alignments:
         i_keep = [
@@ -80,6 +80,7 @@ class LabelEncoding:
                 for sent_slots in file_data.slot_labels:
                     slots.update(np.unique(sent_slots))
                 unique_slots.update(slots)
+        print(unique_intents)
         self.intent_to_int = {intent: i for i, intent in enumerate(sorted(unique_intents))}
         self.int_to_intent = {i: intent for intent, i in self.intent_to_int.items()}
         self.slot_to_int = {slot: i for i, slot in enumerate(sorted(unique_slots))}
@@ -204,6 +205,7 @@ class ATISLanguage:
             sentences,
             padding='longest',
             truncation=True,
+            max_length=512,
             # We use this argument because the texts in the dataset are lists of words (with a label for each word).
             is_split_into_words=True,
             return_tensors='pt'
@@ -263,6 +265,114 @@ class ATISLanguage:
                           shuffle=shuffle,
                           num_workers=num_workers)
 
+class TriTrainingData:
+    """
+    Represents a language from the MultiATIS++ dataset.
+    It pre-loads all splits (train, dev and test) and it can provide
+    a pytorch DataLoader to load batches in the correct format for mBERT.
+    """
+
+    def __init__(
+            self,
+            config: Config,
+            label_encoding: LabelEncoding,
+            tokenizer: PreTrainedTokenizerBase
+    ):
+        self.config = config
+        self.label_encoding = label_encoding
+        self.tokenizer = tokenizer
+        self.train, self.dev, self.val, self.unlabeled, self.test = self.load_data()
+
+    def load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        root = self.config.dataset.path
+        remove_ba = self.config.dataset.remove_bad_alignments
+        lower = self.config.dataset.do_lowercase
+        self.train, self.dev, self.val, self.unlabeled, self.test = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        self.train = self.train.append(read_atis_tsv(root / f"train_EN.tsv", remove_ba, lower))
+        self.dev = self.dev.append(read_atis_tsv(root / f"dev_EN.tsv", remove_ba, lower))
+        self.val = self.val.append(read_atis_tsv(root / f"val_EN.tsv", remove_ba, lower))
+        self.unlabeled = self.unlabeled.append(read_atis_tsv(root / f"unlabeled.tsv", remove_ba, lower))
+        self.test = self.test.append(read_atis_tsv(root / f"test_EN.tsv", remove_ba, lower))
+        return self.train, self.dev, self.val, self.unlabeled, self.test
+
+    def __getitem__(self, split: str) -> ATISLanguageSplit:
+        assert split in ['train', 'dev', 'val', 'unlabeled', 'test'], "Split should be either `train`, `dev` or `test`"
+        data = getattr(self, split)
+        return ATISLanguageSplit(self.label_encoding, data.utterance, data.intent, data.slot_labels)
+
+    def _tokenize_and_align_labels(
+            self,
+            sentences: List[List[str]],
+            labels: List[List[int]]
+    ):
+        # This function is adapted from the NER huggingface script
+        # See https://github.com/huggingface/transformers/blob/master/examples/token-classification/run_ner.py
+        tokenized_inputs = self.tokenizer(
+            sentences,
+            padding='longest',
+            truncation=True,
+            max_length=512,
+            # We use this argument because the texts in the dataset are lists of words (with a label for each word).
+            is_split_into_words=True,
+            return_tensors='pt'
+        )
+        aligned_labels = []
+        for i, label in enumerate(labels):
+            word_ids = tokenized_inputs.word_ids(batch_index=i)
+            previous_word_idx = None
+            label_ids = []
+            for word_idx in word_ids:
+                # Special tokens have a word id that is None.
+                # We set the label to the ignored index so
+                # they are not taken into account in the loss function.
+                if word_idx is None:
+                    label_ids.append(self.config.dataset.ignore_index)
+                # We set the label for the first token of each word.
+                elif word_idx != previous_word_idx:
+                    label_ids.append(label[word_idx])
+                # For the other tokens in a word, we set the label
+                # to either the current label or the ignored index,
+                # depending on the label_all_subwords flag.
+                elif self.config.dataset.label_all_subwords:
+                    label_ids.append(label[word_idx])
+                else:
+                    label_ids.append(self.config.dataset.ignore_index)
+                previous_word_idx = word_idx
+            aligned_labels.append(label_ids)
+        return tokenized_inputs, aligned_labels
+
+    def _collate(self, batch: List[Tuple[str, int, List[int]]]) -> Dict:
+        utterances, slot_labels, intents = [], [], []
+        for u, i, sl in batch:
+            utterances.append(u.split(' '))
+            intents.append(i)
+            slot_labels.append(sl)
+        utterances, labels = self._tokenize_and_align_labels(utterances, slot_labels)
+        return {
+            'input_ids': utterances['input_ids'],
+            'attention_mask': utterances['attention_mask'] if 'attention_mask' in utterances else None,
+            'token_type_ids': utterances['token_type_ids'],
+            'intents': torch.LongTensor(intents),
+            'slot_labels': torch.LongTensor(labels)
+        }
+
+    def get_loader(
+            self,
+            split: str,
+            batch_size: int = 32,
+            shuffle: bool = True,
+            num_workers: Optional[int] = None,
+            pin_memory: Optional[bool] = False,
+    ) -> DataLoader:
+        if num_workers is None:
+            num_workers = multiprocessing.cpu_count() // 2
+        return DataLoader(dataset=self[split],
+                          batch_size=batch_size,
+                          collate_fn=self._collate,
+                          shuffle=shuffle,
+                          num_workers=num_workers,
+                          pin_memory=pin_memory)
+
 
 class MultiATIS(Dataset):
     """
@@ -284,6 +394,8 @@ class MultiATIS(Dataset):
     def __init__(self, config: Config, tokenizer: TokenizerBuilder):
         self.config = config
         root = self.config.dataset.path
+        print(self.config.dataset.path)
+        print([file for file in root.iterdir()])
         self.available_langs = [file.stem[-2:].upper()
                                 for file in root.iterdir()
                                 if file.is_file() and file.stem.startswith('train')]

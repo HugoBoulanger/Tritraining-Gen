@@ -1,0 +1,93 @@
+
+
+BERT:
+  dataset:
+    # Special slot label value specifying that the token
+    # should be ignored during loss and performance calculation
+    ignore_index: -100
+    # Whether to remove utterances whose length doesn't match slot labels length
+    remove_bad_alignments: true
+    # Whether to lowercase utterances
+    do_lowercase: false
+    # Whether to label all subwords or only the first one and ignore the others
+    label_all_subwords: false
+
+  model:
+    # Model name (huggingface) or path to model checkpoint directory to load the model and tokenizer.
+    # If it's a name, it will download the checkpoint from huggingface.co
+    name_or_path:
+
+    # Path to seqeval.py script to load the metric locally (offline mode).
+    # Download the original script: https://github.com/huggingface/datasets/blob/master/metrics/seqeval/seqeval.py
+    # Remove the value to load it from huggingface.co when used.
+    seqeval_path:
+
+  train:
+    # Fix seed for reproducibility
+    seed: 1
+    # Batch size to use during training
+    batch_size: 16
+    # Validation metric to look at for model selection: intent_acc|slot_f1|loss. Defaults to 'slot_f1'
+    validation_metric: 'slot_f1'
+    # Whether train for intent detection as well as slot filling. Defaults to False
+    do_intent_detection: false
+    # Whether to freeze BERT weights. Defaults to False
+    freeze_bert: false
+    # The dropout probability to use on output embeddings before classification. float. Defaults to 0.1.
+    dropout: 0.1
+    # Learning rate to train the model. float. Defaults to 1e-5.
+    learning_rate: 1e-5
+    # The weight to give to the slot filling loss during training. float. Defaults to 1.
+    slot_loss_coeff: 1
+    # The number of epochs to train each language. Defaults to 20.
+    epochs_per_lang: 1000
+    # The number of workers to use for data fetching. Optional, defaults to half the number of processors.
+    num_workers: 4
+    # Whether to keep checkpoints in disk. Can be deactivated to save disk space. Defaults to True.
+    keep_checkpoints: true
+    # The languages to train the model on.
+    languages: [ 'EN' ]
+
+tri-train:
+  preprocess:
+    # Path to TSV files for train, dev and test
+    path:
+    # Whether this operation was completed by tri training, default is false
+    done: false
+    # Seed for the randomization of training data
+    seed: 1
+    # Max size of the training data
+    size: 1000
+    # Split: size of the split of training data actually used in this particular experiment (the inclusion spilts)
+    split: 50
+    # Generator path
+    gen_path:
+
+  tritraining:
+    append_unlabeled: false
+    data_prep_done : false
+    tritraining_done : false
+    baseline_done : false
+    generation_done : false
+    pretrain_done : false
+    current_episode: 0
+    current_tri: 1
+    # Number of episodes
+    episodes: 20
+
+  model:
+    # Model name (huggingface) or path to model checkpoint directory to load the model and tokenizer.
+    # If it's a name, it will download the checkpoint from huggingface.co
+    name_or_path:
+    seqeval_path:
+
+  dataset:
+    # Path to TSV files for train, dev and test after preprocessing
+    path:
+    # Special slot label value specifying that the token
+    # should be ignored during loss and performance calculation
+    ignore_index: -100
+
+  train:
+    batch_size: 16
+    num_workers: 4

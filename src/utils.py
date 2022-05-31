@@ -30,7 +30,7 @@ from typing import Union, Text
 import numpy as np
 import pandas as pd
 import torch
-from transformers import BertTokenizerFast, BertModel
+from transformers import BertTokenizerFast, BertModel, GPT2TokenizerFast, GPT2LMHeadModel
 
 
 def download_model(save_dir: Path, name: Text):
@@ -50,6 +50,31 @@ def download_model(save_dir: Path, name: Text):
     # Load pretrained tokenizer and model from huggingface.co
     tokenizer = BertTokenizerFast.from_pretrained(name)
     model = BertModel.from_pretrained(name)
+    print('OK')
+
+    print(f"Saving model {name} to {save_dir} ... ", end='', flush=True)
+    # save the tokenizer and the model locally
+    tokenizer.save_pretrained(str(save_dir))
+    model.save_pretrained(str(save_dir))
+    print('OK')
+
+def download_gpt2(save_dir: Path, name: Text):
+    """
+    Load pretrained tokenizer and model from huggingface.co and save them locally
+    :param save_dir: Path
+        Directory where the files are saved.
+    :param name: Text
+        Name of the BERT checkpoint to download (e.g. 'bert-base-multilingual-cased')
+        The list of possible names can be found at https://huggingface.co/transformers/pretrained_models.html
+    """
+    print(f'Creating directory {save_dir} ... ', end='', flush=True)
+    save_dir.mkdir(parents=True, exist_ok=False)
+    print('OK')
+
+    print(f"Getting model {name} ... ", end='', flush=True)
+    # Load pretrained tokenizer and model from huggingface.co
+    tokenizer = GPT2TokenizerFast.from_pretrained(name)
+    model = GPT2LMHeadModel.from_pretrained(name)
     print('OK')
 
     print(f"Saving model {name} to {save_dir} ... ", end='', flush=True)
@@ -92,14 +117,16 @@ def valid_dirs_in(path: Path, pattern):
 
 def get_checkpoint_path(root: Path) -> Path:
     ckpt_path = root / "logs"
-    lang_dirs = list(valid_dirs_in(ckpt_path, pattern=r"[0-9]{1}_[A-Z]{2}"))
-    last_lang_dirs = list(valid_dirs_in(ckpt_path, pattern=rf"{len(lang_dirs) - 1}_[A-Z]{{2}}"))
-    assert len(last_lang_dirs) != 0, f"The language directory with index {len(lang_dirs) - 1} does not exist"
-    assert len(last_lang_dirs) == 1, f"Found {len(last_lang_dirs)} last language directories, but only 1 should exist"
-    ckpt_path = ckpt_path / last_lang_dirs[0] / "checkpoints"
+    #lang_dirs = list(valid_dirs_in(ckpt_path, pattern=r"[0-9]{1}_[A-Z]{2}"))
+    #last_lang_dirs = list(valid_dirs_in(ckpt_path, pattern=rf"{len(lang_dirs) - 1}_[A-Z]{{2}}"))
+    #assert len(last_lang_dirs) != 0, f"The language directory with index {len(lang_dirs) - 1} does not exist"
+    #assert len(last_lang_dirs) == 1, f"Found {len(last_lang_dirs)} last language directories, but only 1 should exist"
+    #ckpt_path = ckpt_path / last_lang_dirs[0] / "checkpoints"
+    ckpt_path = ckpt_path / "checkpoints"
     ckpt_files = []
     for path in ckpt_path.iterdir():
         if path.is_file() and path.name.endswith(".ckpt"):
             ckpt_files.append(path)
-    assert len(ckpt_files) == 1, f"Found {len(ckpt_files)} checkpoints but only 1 should exist"
+    print(ckpt_files)
+    #assert len(ckpt_files) == 1, f"Found {len(ckpt_files)} checkpoints but only 1 should exist"
     return ckpt_files[0]
