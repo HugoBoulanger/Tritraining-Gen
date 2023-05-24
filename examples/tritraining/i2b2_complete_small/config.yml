@@ -1,0 +1,33 @@
+
+
+BERT:
+  dataset:
+    do_lowercase: false
+  model:
+    name_or_path: '../../biobert-base-cased'
+    seqeval_path: 'seqeval.py'
+    patience: 40
+  train:
+    epochs_per_lang: 1000
+
+tri-train:
+  preprocess:
+    path: '../../../data/I2B2/tsv'
+    gen_path: '../../gpt2-large'
+    gpt2_path: '../../gpt2-large'
+    t5_path: '../../google/t5-v1_1-large'
+    seed: [ 1, 2, 3, 4, 5 ]
+    split: [50]
+    method: "complete"
+  tritraining:
+    episodes: 20
+    generation_done: true
+    baseline_done: true
+    append_unlabeled: false
+    generate_episodic: true
+    full_pretrain: true
+  model:
+    name_or_path: '../../biobert-base-cased/'
+    seqeval_path: 'seqeval.py'
+
+

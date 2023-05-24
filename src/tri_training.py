@@ -1,59 +1,11 @@
-# MIT License
-#
-# Copyright (c) 2022 Université Paris-Saclay
-# Copyright (c) 2022 Laboratoire Interdisciplinaire des Sciences du Numérique (LISN)
-# Copyright (c) 2022 CNRS
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
-
-# MIT License
-#
-# Copyright (c) 2021 Université Paris-Saclay
-# Copyright (c) 2021 Laboratoire national de métrologie et d'essais (LNE)
-# Copyright (c) 2021 CNRS
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 import argparse
 import pandas as pd
 import random
 import shutil, sys, os
+import copy
 import re
 import datetime
+import gc
 
 import pytorch_lightning as pl
 import torch as t
@@ -70,6 +22,8 @@ from dataset import MultiATIS, TriTrainingData, LabelEncoding
 from utils import get_checkpoint_path
 from metrics import SlotF1
 from tqdm import tqdm
+#from memory_profiler import profile
+from generator import *
 
 
 def train_BERT(args):
@@ -93,6 +47,8 @@ def train_BERT(args):
         """
 
     config = Config(args.dir / "config.yml")
+    if not config.train.keep_training:
+        return 0
     args.epochs = config.train.epochs_per_lang
     languages = config.train.languages
     monolingual = len(languages) == 1 or args.from_ckpt
@@ -164,7 +120,11 @@ def train_BERT(args):
     #print(*[m for m in model.named_modules()], sep='\n')
 
     trainer.fit(model, train_loader, val_loader)
+    best_ckpt = trainer.checkpoint_callback.best_model_path
+    with open(log_dir / 'logs/checkpoints/best_model_path.txt', 'w') as f:
+        f.write(best_ckpt)
 
+    """
     # EVALUATION
     eval_split = 'test'
     print(f"Evaluate the trained model on {eval_split}")
@@ -177,7 +137,7 @@ def train_BERT(args):
         f.write(best_ckpt)
     model = MultiBERTForNLU.load_from_checkpoint(
         checkpoint_path=best_ckpt,
-        map_location=model.device,
+        map_location='cpu' if args.gpus == 0 else 'cuda',
         dataset=dataset,
         config=model.cfg
     )
@@ -218,9 +178,91 @@ def train_BERT(args):
     for p in (log_dir / "logs/checkpoints/").glob('*.ckpt'):
         if str(p) != str(best_ckpt):
             p.unlink()
+    """
 
-    del trainer
-    del model
+
+def evaluate_BERT(args, loader):
+    """
+    Evaluates BERT
+    :return:
+    """
+    log_dir = args.dir
+    config = Config(args.dir / "config.yml")
+    print("Loading dataset... ", end="", flush=True)
+    dataset = MultiATIS(config, MultiBERTTokenizer)
+    print("OK")
+    print(f"evaluate log_dir : {log_dir}")
+    """
+    recovery_path = ckpt_path.parent / f"recovery_{args.epochs}_epochs_{ckpt_path.name[:-5]}"
+    if recovery_path.exists():
+        print(f"Removing existing directory {recovery_path.name}")
+        rmtree(recovery_path)
+    recovery_path.mkdir(exist_ok=False)
+    log_dir = recovery_path
+    """
+    with open(log_dir / 'logs/checkpoints/best_model_path.txt', 'r') as f:
+        best_ckpt = f.read()
+    logger = TensorBoardLogger(save_dir=log_dir, name=None, version='logs')
+    trainer = pl.Trainer(
+        gpus=args.gpus,
+        max_epochs=1,
+        num_sanity_val_steps=0,
+        logger=logger,
+        enable_checkpointing=False,
+        checkpoint_callback=False,
+        callbacks=[]
+    )
+    model = MultiBERTForNLU.load_from_checkpoint(
+        checkpoint_path=best_ckpt,
+        map_location='cpu' if args.gpus == 0 else 'cuda',
+        dataset=dataset,
+        config=config
+    )
+
+
+    performance = {}
+    eval_split = 'test'
+    print(f"Evaluate the trained model on {eval_split}")
+
+    lang = config.train.languages[0]
+
+    # Get slot-filling scores report with scores per slot types
+    results = trainer.test(model=model, dataloaders=loader, verbose=False, ckpt_path=None)
+    report = model.test_slot_f1.compute()['report']
+    print(results)
+    print(report)
+    performance[lang.upper()] = results[0]["test_f1"]
+    report.to_csv(Path(logger.log_dir) / f"slot_filling_report_{eval_split}_{lang.upper()}.csv")
+
+    print()
+    print(pd.DataFrame(performance, index=["slot f1"]).round(2))
+    print()
+    print(f"evaluate log_dir : {log_dir}")
+
+    return results[0]["test_f1"]
+
+#@profile
+def train_test_BERT(args):
+    train_BERT(args)
+    gc.collect()
+    eval_split = 'test'
+    print(f"Evaluate the trained model on {eval_split}")
+
+    config = Config(args.dir / "config.yml")
+    print("Loading dataset... ", end="", flush=True)
+    dataset = MultiATIS(config, MultiBERTTokenizer)
+    print("OK")
+    lang = config.train.languages[0]
+    data_eval = dataset[lang]
+    eval_loader = data_eval.get_loader(
+        split=eval_split,
+        batch_size=config.train.batch_size,
+        shuffle=False,
+        num_workers=config.train.num_workers
+    )
+    results = evaluate_BERT(args, eval_loader)
+    gc.collect()
+
 
 def load_model(args):
     """
@@ -267,7 +309,8 @@ def pd_to_column(db):
         s +="\n"
     return s
 
-def annotate_w_BERT(args, model, dataset, name, config):
+
+def annotate_w_BERT(args, dataset, name, config):
     """
     Capsulated version of annotate.py
     :return:
@@ -287,14 +330,18 @@ def annotate_w_BERT(args, model, dataset, name, config):
         num_sanity_val_steps=0,
     )
 
+    model = load_model(args)
+
     print("####   Annotation    ####\n\n")
     with t.no_grad():
         pred = trainer.predict(model, loader)
 
         preds = []
-        k = 0
-        for x in loader:
-            new_preds = pred[k].get_predictions(log=False)[0]
+        #k = 0
+        for i in range(len(pred)):
+            preds.extend(pred.pop(0))
+        """
+            new_preds = pred.pop(0).get_predictions(log=False)[0]
             values, indices = t.max(new_preds, dim=2)
             align = t.clip(x['slot_labels'], max=0)
             indices = indices + align
@@ -302,15 +349,16 @@ def annotate_w_BERT(args, model, dataset, name, config):
             indices = list(indices.numpy())
             nex = [[(values[i][j], indices[i][j]) for j in range(len(values[i]))] for i in range(len(values))]
             preds.extend(nex)
-            k+=1
-
-        del pred
+        """
 
         for i in range(len(preds)):
             preds[i] = remove_missaligned(preds[i])
 
-        labels = [dataset.label_encoding.decodify_slot_labels([preds[i][j][1] for j in range(len(preds[i]))]) for i in
+        labels = [correct_tags(dataset.label_encoding.decodify_slot_labels([preds[i][j][1] for j in range(len(preds[i]))])) for i in
                   range(len(preds))]
+        for i in range(len(labels)):
+            length_test(dataset.unlabeled['utterance'][i].split(), labels[i])
+
         db = pd.DataFrame(
             [[dataset.unlabeled['utterance'][i], ' '.join(labels[i]), '0']
              for i in range(len(preds))], columns=['utterance', 'slot_labels', 'intent'])
@@ -322,42 +370,6 @@ def annotate_w_BERT(args, model, dataset, name, config):
         #    f.write(s)
 
 
-
-def evaluate_BERT(args, model, loader):
-    """
-    Evaluates BERT
-    :return: 
-    """
-
-    log_dir = args.dir
-    print(f"evaluate log_dir : {log_dir}")
-    """
-    recovery_path = ckpt_path.parent / f"recovery_{args.epochs}_epochs_{ckpt_path.name[:-5]}"
-    if recovery_path.exists():
-        print(f"Removing existing directory {recovery_path.name}")
-        rmtree(recovery_path)
-    recovery_path.mkdir(exist_ok=False)
-    log_dir = recovery_path
-    """
-
-    logger = TensorBoardLogger(save_dir=log_dir, name=None, version='logs')
-    trainer = pl.Trainer(
-        gpus=args.gpus,
-        max_epochs=1,
-        num_sanity_val_steps=0,
-        logger=logger,
-        checkpoint_callback=False,
-        callbacks=[]
-    )
-
-    results = trainer.test(model, loader, verbose=False)[0]
-    report = model.test_slot_f1.compute()['report']
-    print(results)
-    print(report)
-    print(f"evaluate log_dir : {log_dir}")
-    return results["test_f1"]
-
-
 def bootstrap_sampling(lines, rand):
     """
     :return:
@@ -367,15 +379,57 @@ def bootstrap_sampling(lines, rand):
     tri3 = rand.choices(lines, k=len(lines))
     return tri1, tri2, tri3
 
+def self_training_pretrain(args):
+    """
+        Initializes the three taggers pretrain the models on the split data
+        :return:
+    """
+    print(args.dir)
+    tcfg = TriTrainingConfig(args.dir / 'config.yml')
+    dataset = TriTrainingData(tcfg, LabelEncoding(args.dir / 'data'), MultiBERTTokenizer(tcfg))
 
+    print(f"########## model 1 #########\n\n\n")
+    dir = args.dir
+    args.dir = args.dir / f"self-training"
+    args.from_ckpt = False
+    train_test_BERT(args)
+    #model = load_model(args)
+    cfg = Config(args.dir / 'config.yml')
+    if (not tcfg.tritraining.generate_episodic) or tcfg.tritraining.append_unlabeled:
+        annotate_w_BERT(args, dataset, f"self-training", cfg)
+    args.dir = dir
+    shutil.copyfile(args.dir / f"data/self-training/train_EN.tsv", args.dir / f"data/self-training/train_bootstrap_EN.tsv")
+    gc.collect()
+    print(f"########## End of model 1 #########\n\n\n")
+
+    if tcfg.tritraining.full_pretrain:
+        print(f"########## model 1 #########\n\n\n")
+        dir = args.dir
+        shutil.copyfile(args.dir / f"data/train_EN.tsv", args.dir / f"data/self-training/train_EN.tsv")
+        args.dir = args.dir / f"self-training"
+        args.from_ckpt = True
+        train_test_BERT(args)
+        # model = load_model(args)
+        cfg = Config(args.dir / 'config.yml')
+        if (not tcfg.tritraining.generate_episodic) or tcfg.tritraining.append_unlabeled:
+            annotate_w_BERT(args, dataset, f"self-training", cfg)
+        args.dir = dir
+        #shutil.copyfile(args.dir / f"data/tri-{i}/train_EN.tsv", args.dir / f"data/tri-{i}/train_bootstrap_EN.tsv")
+        gc.collect()
+        args.from_ckpt = False
+        print(f"########## End of model 1 #########\n\n\n")
+
+
+
+#@profile
 def tri_training_pretrain(args):
     """
     Initializes the three taggers pretrain the models on the split data
     :return:
     """
     print(args.dir)
-    cfg = TriTrainingConfig(args.dir / 'config.yml')
-    dataset = TriTrainingData(cfg, LabelEncoding(args.dir / 'data'), MultiBERTTokenizer(cfg))
+    tcfg = TriTrainingConfig(args.dir / 'config.yml')
+    dataset = TriTrainingData(tcfg, LabelEncoding(args.dir / 'data'), MultiBERTTokenizer(tcfg))
 
     #print(dataset.unlabeled)
 
@@ -384,16 +438,70 @@ def tri_training_pretrain(args):
         dir = args.dir
         args.dir = args.dir / f"tri-{i}"
         args.from_ckpt = False
-        train_BERT(args)
-        model = load_model(args)
+        train_test_BERT(args)
+        #model = load_model(args)
         cfg = Config(args.dir / 'config.yml')
-        annotate_w_BERT(args, model, dataset, f"tri-{i}", cfg)
+        if (not tcfg.tritraining.generate_episodic) or tcfg.tritraining.append_unlabeled:
+            annotate_w_BERT(args, dataset, f"tri-{i}", cfg)
         args.dir = dir
         shutil.copyfile(args.dir / f"data/tri-{i}/train_EN.tsv", args.dir / f"data/tri-{i}/train_bootstrap_EN.tsv")
+        gc.collect()
         print(f"########## End of model {i} #########\n\n\n")
 
+    if tcfg.tritraining.full_pretrain:
+        for i in range(1, 4):
+            print(f"########## model {i} #########\n\n\n")
+            dir = args.dir
+            shutil.copyfile(args.dir / f"data/train_EN.tsv", args.dir / f"data/tri-{i}/train_EN.tsv")
+            args.dir = args.dir / f"tri-{i}"
+            args.from_ckpt = True
+            train_test_BERT(args)
+            # model = load_model(args)
+            cfg = Config(args.dir / 'config.yml')
+            if (not tcfg.tritraining.generate_episodic) or tcfg.tritraining.append_unlabeled:
+                annotate_w_BERT(args, dataset, f"tri-{i}", cfg)
+            args.dir = dir
+            #shutil.copyfile(args.dir / f"data/tri-{i}/train_EN.tsv", args.dir / f"data/tri-{i}/train_bootstrap_EN.tsv")
+            gc.collect()
+            print(f"########## End of model {i} #########\n\n\n")
 
 
+def self_training_episode(args, cfg):
+    """
+    :param args:
+    :param cfg:
+    :return:
+    """
+    scores = []
+
+    print(f"Episode args.dir : {args.dir}")
+    dataset = TriTrainingData(cfg, LabelEncoding(args.dir / 'data'), MultiBERTTokenizer(cfg))
+
+    dir = args.dir
+    args.dir = args.dir / f"self-training"
+    print(f"args.dir : {args.dir}")
+    print(f"########## model 1 #########\n\n\n")
+    train_test_BERT(args)
+    cfg_loc = Config(args.dir / 'config.yml')
+    # model = load_model(args)
+    annotate_w_BERT(args, dataset, f"self-training", cfg_loc)
+    loader = dataset.get_loader(
+                split="val",
+                batch_size=cfg_loc.train.batch_size,
+                shuffle=False,
+                num_workers=cfg_loc.train.num_workers
+            )
+    scores.append(evaluate_BERT(args, loader))
+    args.dir = dir
+    cfg.save()
+    print(f"########## End of model 1 #########\n\n\n")
+    gc.collect()
+    cfg.tritraining.current_tri = 1
+    cfg.save()
+    return scores
+
+
+#@profile
 def tri_training_episode(args, cfg):
     """
     Runs one episode of Tri-training.
@@ -414,32 +522,33 @@ def tri_training_episode(args, cfg):
         print(f"args.dir : {args.dir}")
         if i < cfg.tritraining.current_tri:
             cfg_loc = Config(args.dir / 'config.yml')
-            model = load_model(args)
+            #model = load_model(args)
             loader = dataset.get_loader(
                 split="val",
                 batch_size=cfg_loc.train.batch_size,
                 shuffle=False,
                 num_workers=cfg_loc.train.num_workers
             )
-            scores.append(evaluate_BERT(args, model, loader))
+            scores.append(evaluate_BERT(args, loader))
             args.dir = dir
-            continue
-        print(f"########## model {i} #########\n\n\n")
-        train_BERT(args)
-        cfg_loc = Config(args.dir / 'config.yml')
-        model = load_model(args)
-        annotate_w_BERT(args, model, dataset, f"tri-{i}", cfg_loc)
-        loader = dataset.get_loader(
-            split="val",
-            batch_size=cfg_loc.train.batch_size,
-            shuffle=False,
-            num_workers=cfg_loc.train.num_workers
-        )
-        scores.append(evaluate_BERT(args, model, loader))
-        args.dir = dir
-        cfg.tritraining.current_tri += 1
-        cfg.save()
-        print(f"########## End of model {i} #########\n\n\n")
+        else:
+            print(f"########## model {i} #########\n\n\n")
+            train_test_BERT(args)
+            cfg_loc = Config(args.dir / 'config.yml')
+            #model = load_model(args)
+            annotate_w_BERT(args, dataset, f"tri-{i}", cfg_loc)
+            loader = dataset.get_loader(
+                split="val",
+                batch_size=cfg_loc.train.batch_size,
+                shuffle=False,
+                num_workers=cfg_loc.train.num_workers
+            )
+            scores.append(evaluate_BERT(args, loader))
+            args.dir = dir
+            cfg.tritraining.current_tri += 1
+            cfg.save()
+            print(f"########## End of model {i} #########\n\n\n")
+        gc.collect()
     cfg.tritraining.current_tri = 1
     cfg.save()
     return scores
@@ -494,7 +603,7 @@ def text_cleaning(line):
     line = re.subn(r' +', ' ', line)[0]
     return line
 
-def generate_follow_ups(generator, sentence):
+def generate_follow_ups(generator, sentence, num_sequences=5):
     """
     generates follow-up sentences using GPT2
     :return:
@@ -503,14 +612,34 @@ def generate_follow_ups(generator, sentence):
     s = sentence.split()[1:-1]
     #print(s)
     sj = ' '.join(s)
-    g = generator(sj, max_len=len(s)*3, num_return_sequences=5, return_full_text=False)
+    g = generator(sj, max_len=len(s)*3, num_return_sequences=num_sequences, return_full_text=False)
     #print(g)
     #print(*g, sep='\n')
     ret = [text_cleaning(gg['generated_text'].encode().decode('utf-8', 'ignore')) for gg in g]
     #print(ret)
     return ret
 
-def generate_end(generator, sentence, percentage):
+def choose_index(tags, rd):
+
+    index = rd.choice()
+    return index
+
+def generate_end(generator, sentence, index, num_sequences=5):
+    """
+        Generates end of sentences using GPT2
+        cuts the sentences to appropriate percentage
+        :return:
+        """
+    s = sentence.split()[1:-1]
+    leng = len(s)
+    s = s[:index]
+    sj = ' '.join(s)
+    g = generator(sj, max_len=int(leng*1.5), num_return_sequences=num_sequences, return_full_text=True)
+    ret = [text_cleaning(gg['generated_text'].encode().decode('utf-8', 'ignore')) for gg in g]
+    # print(ret)
+    return ret
+
+def generate_end_old(generator, sentence, percentage):
     """
     Generates end of sentences using GPT2
     cuts the sentences to appropriate percentage
@@ -523,6 +652,7 @@ def generate_end(generator, sentence, percentage):
     ret = [text_cleaning(gg['generated_text'].encode().decode('utf-8', 'ignore')) for gg in g]
     # print(ret)
     return ret
+
 
 def text_to_pd(lines):
     """
@@ -572,6 +702,117 @@ def generate(train_path, seed, path_out, gen_path, append_to_unlabeled=False):
     df.to_csv(path_out, sep='\t', encoding='utf-8')
 
 
+def remove_suboptimal_ckpt(dire):
+    ignore = []
+    with open(dire / 'best_model_path.txt', 'r') as f:
+        ignore.append(f.read())
+    with open(dire / 'overall_best_model_path.txt', 'r') as f:
+        ignore.append(f.read())
+    for p in dire.glob('*.ckpt'):
+        if str(p) not in ignore:
+            p.unlink()
+
+
+def self_training(args):
+    """
+        Full tri-training procedure
+        :return:
+        """
+
+    cfg = TriTrainingConfig(args.dir / 'config.yml')
+    dir = args.dir
+    rd = random.Random()
+    rd.seed(a=cfg.preprocess.seed)
+
+    if not cfg.tritraining.pretrain_done:
+        self_training_pretrain(args)
+        args.dir = dir
+        if not cfg.tritraining.generate_episodic:
+            make_pseudolabels_set(args)
+        args.dir = dir
+        cfg.tritraining.pretrain_done = True
+        cfg.save()
+
+    episodes = cfg.tritraining.episodes
+    scores = [[-1]]
+    args.from_ckpt = False
+    writer1 = SummaryWriter(f"{dir}/runs/{datetime.datetime.now():%y%m%d%H%M}_Selftraining_{cfg.preprocess.seed}")
+    b = cfg.tritraining.current_episode
+    for e in range(b, episodes):
+        print(f'\n\n\n###### Beginning Episode {e} / {episodes} ######\n\n\n')
+        args.dir = dir
+
+        if cfg.tritraining.generate_episodic and cfg.tritraining.current_tri == 1:
+            nat = list(
+                pd.read_csv(args.dir / f'data/train_EN.tsv', sep='\t', usecols=['utterance', 'slot_labels', 'intent'])[
+                    ['utterance', 'slot_labels']].to_records(index=False))
+            if e == 0:
+                valid_data = {'natural': nat, 'model_1': []}
+            else:
+                dat = []
+                for i in range(1, 4):
+                    dat.append(list(pd.read_csv(args.dir / f'data/self-training/last_labeled.tsv', sep='\t',
+                                                usecols=['utterance', 'slot_labels', 'intent'])[
+                                        ['utterance', 'slot_labels']].to_records(index=False)))
+                valid_data = {'natural': nat, 'model_1': dat[0]}
+            generate_packet(args, valid_data, rd, e, cfg.preprocess.method)
+
+        args.dir = dir
+        cfg.tritraining.current_episode = e
+        cfg.save()
+        # print(f"args.dir : {args.dir}")
+        s = self_training_episode(args, cfg)
+
+        if s[0] >= max(scores[0]):
+            shutil.copyfile(args.dir / "self-training/logs/checkpoints/best_model_path.txt",
+                            args.dir / "self-training/logs/checkpoints/overall_best_model_path.txt")
+            remove_suboptimal_ckpt(args.dir / "self-training/logs/checkpoints/")
+
+        cfg.tritraining.current_episode = e + 1
+        cfg.save()
+        writer1.add_scalar(f"Tritraining/Validation_F1", s[0], e)
+        cfg1 = Config(args.dir / "self-training/config.yml")
+
+        if cfg1.train.keep_training and s[0] <= max(scores[0]):
+            cfg1.train.keep_training = False
+            cfg1.save()
+            shutil.copyfile(args.dir / "self-training/logs/checkpoints/overall_best_model_path.txt",
+                            args.dir / "self-training/logs/checkpoints/best_model_path.txt")
+            remove_suboptimal_ckpt(args.dir / "self-training/logs/checkpoints/")
+            scores[0].append(s[0])
+            with open(args.dir / Path('tritraining_validation_scores.txt'), 'w') as f:
+                f.write(str(scores))
+            break
+
+        scores[0].append(s[0])
+        if not cfg.tritraining.generate_episodic:
+            make_pseudolabels_set(args)
+        print(f'\n\n\n###### End Episode {e} / {episodes} ######\n\n\n')
+
+    cfg = TriTrainingConfig(args.dir / 'config.yml')
+
+    dataset = TriTrainingData(cfg, LabelEncoding(args.dir / 'data'), MultiBERTTokenizer(cfg))
+    loader = dataset.get_loader(
+        split="test",
+        batch_size=cfg.train.batch_size,
+        shuffle=False,
+        num_workers=cfg.train.num_workers
+    )
+
+    scores = []
+
+    args.dir = dir / f"self-training"
+    # model = load_model(args)
+    scores.append(evaluate_BERT(args, loader))
+    shutil.copyfile(args.dir / f"logs/slot_filling_report_test_EN.csv", dir / "logs/slot_filling_report_test_EN.csv")
+    # del model
+    gc.collect()
+    with open(args.dir / "scores.txt", 'w') as f:
+        f.write(str(scores))
+
+
+
+#@profile
 def tri_training(args):
     """
     Full tri-training procedure
@@ -580,14 +821,19 @@ def tri_training(args):
 
     cfg = TriTrainingConfig(args.dir / 'config.yml')
     dir = args.dir
+    rd = random.Random()
+    rd.seed(a=cfg.preprocess.seed)
 
     if not cfg.tritraining.pretrain_done:
         tri_training_pretrain(args)
         args.dir = dir
-        make_pseudolabels_set(args)
+        if not cfg.tritraining.generate_episodic:
+            make_pseudolabels_set(args)
         args.dir = dir
         cfg.tritraining.pretrain_done = True
         cfg.save()
+
+
 
     episodes = cfg.tritraining.episodes
     scores = [[-1], [-1], [-1]]
@@ -599,16 +845,74 @@ def tri_training(args):
     for e in range(b, episodes):
         print(f'\n\n\n###### Beginning Episode {e} / {episodes} ######\n\n\n')
         args.dir = dir
+
+        if cfg.tritraining.generate_episodic and cfg.tritraining.current_tri == 1:
+            nat = list(
+                pd.read_csv(args.dir / f'data/train_EN.tsv', sep='\t', usecols=['utterance', 'slot_labels', 'intent'])[
+                    ['utterance', 'slot_labels']].to_records(index=False))
+            if e == 0:
+                valid_data = {'natural': nat, 'model_1': [], 'model_2': [], 'model_3': []}
+            else:
+                dat = []
+                for i in range(1, 4):
+                    dat.append(list(pd.read_csv(args.dir / f'data/tri-{i}/last_labeled.tsv', sep='\t',
+                                   usecols=['utterance', 'slot_labels', 'intent'])[['utterance', 'slot_labels']].to_records(index=False)))
+                valid_data = {'natural': nat, 'model_1': dat[0], 'model_2': dat[1], 'model_3': dat[2]}
+            generate_packet(args, valid_data, rd, e, cfg.preprocess.method)
+
+        args.dir = dir
         cfg.tritraining.current_episode = e
         cfg.save()
         #print(f"args.dir : {args.dir}")
         s = tri_training_episode(args, cfg)
+
+        if s[0] >= max(scores[0]):
+            shutil.copyfile(args.dir / "tri-1/logs/checkpoints/best_model_path.txt",
+                            args.dir / "tri-1/logs/checkpoints/overall_best_model_path.txt")
+            remove_suboptimal_ckpt(args.dir / "tri-1/logs/checkpoints/")
+
+        if s[1] >= max(scores[1]):
+            shutil.copyfile(args.dir / "tri-2/logs/checkpoints/best_model_path.txt",
+                            args.dir / "tri-2/logs/checkpoints/overall_best_model_path.txt")
+            remove_suboptimal_ckpt(args.dir / "tri-2/logs/checkpoints/")
+
+        if s[2] >= max(scores[2]):
+            shutil.copyfile(args.dir / "tri-3/logs/checkpoints/best_model_path.txt",
+                            args.dir / "tri-3/logs/checkpoints/overall_best_model_path.txt")
+            remove_suboptimal_ckpt(args.dir / "tri-3/logs/checkpoints/")
+
         cfg.tritraining.current_episode = e+1
         cfg.save()
         writer1.add_scalar(f"Tritraining/Validation_F1", s[0], e)
         writer2.add_scalar(f"Tritraining/Validation_F1", s[1], e)
         writer3.add_scalar(f"Tritraining/Validation_F1", s[2], e)
-        if s[0] <= max(scores[0]) and s[1] <= max(scores[1]) and s[2] <= max(scores[2]):
+        cfg1 = Config(args.dir / "tri-1/config.yml")
+        cfg2 = Config(args.dir / "tri-2/config.yml")
+        cfg3 = Config(args.dir / "tri-3/config.yml")
+
+        if cfg1.train.keep_training and s[0] <= max(scores[0]):
+            cfg1.train.keep_training = False
+            cfg1.save()
+            shutil.copyfile(args.dir / "tri-1/logs/checkpoints/overall_best_model_path.txt",
+                            args.dir / "tri-1/logs/checkpoints/best_model_path.txt")
+            remove_suboptimal_ckpt(args.dir / "tri-1/logs/checkpoints/")
+
+        if cfg2.train.keep_training and s[1] <= max(scores[1]):
+            cfg2.train.keep_training = False
+            cfg2.save()
+            shutil.copyfile(args.dir / "tri-2/logs/checkpoints/overall_best_model_path.txt",
+                            args.dir / "tri-2/logs/checkpoints/best_model_path.txt")
+            remove_suboptimal_ckpt(args.dir / "tri-2/logs/checkpoints/")
+
+        if cfg3.train.keep_training and s[2] <= max(scores[2]):
+            cfg3.train.keep_training = False
+            cfg3.save()
+            shutil.copyfile(args.dir / "tri-3/logs/checkpoints/overall_best_model_path.txt",
+                            args.dir / "tri-3/logs/checkpoints/best_model_path.txt")
+            remove_suboptimal_ckpt(args.dir / "tri-3/logs/checkpoints/")
+
+        if (s[0] <= max(scores[0]) and s[1] <= max(scores[1]) and s[2] <= max(scores[2])) or \
+                (not cfg1.train.keep_training and not cfg2.train.keep_training and not cfg3.train.keep_training):
             scores[0].append(s[0])
             scores[1].append(s[1])
             scores[2].append(s[2])
@@ -618,7 +922,8 @@ def tri_training(args):
         scores[0].append(s[0])
         scores[1].append(s[1])
         scores[2].append(s[2])
-        make_pseudolabels_set(args)
+        if not cfg.tritraining.generate_episodic:
+            make_pseudolabels_set(args)
         print(f'\n\n\n###### End Episode {e} / {episodes} ######\n\n\n')
 
     cfg = TriTrainingConfig(args.dir / 'config.yml')
@@ -634,10 +939,12 @@ def tri_training(args):
     scores = []
     for i in range(1, 4):
         args.dir = dir / f"tri-{i}"
-        model = load_model(args)
-        scores.append(evaluate_BERT(args, model, loader))
-    with open(args.dir / "scores.txt", 'w') as f:
-        f.write(str(scores))
+        #model = load_model(args)
+        scores.append(evaluate_BERT(args, loader))
+        #del model
+        gc.collect()
+        with open(args.dir / "scores.txt", 'w') as f:
+            f.write(str(scores))
 
     models = []
     for i in range(1, 4):
@@ -683,7 +990,7 @@ def evaluate_tri_training(args, models, dataset, name, loader, cfg):
             for m in models:
                 new_preds.append(m(x).get_predictions(log=False)[0])
             new_preds = t.sum(t.stack(new_preds, dim=0), dim=0)
-            metr.update(new_preds, x['slot_labels'])
+            metr.update(new_preds, copy.deepcopy(x['slot_labels']))
 
             values, indices = t.max(new_preds, dim=2)
             align = t.clip(x['slot_labels'], max=0)
@@ -739,9 +1046,13 @@ def prepare_data(args):
         os.mkdir(args.dir / "data/tri-1")
         os.mkdir(args.dir / "data/tri-2")
         os.mkdir(args.dir / "data/tri-3")
+        os.mkdir(args.dir / "data/self-training")
     except Exception:
         ...
     finally:
+        shutil.copyfile(cfg.preprocess.path / "test_EN.tsv", args.dir / "data/self-training/test_EN.tsv")
+        copy_split_half_tsv(cfg.preprocess.path / "dev_EN.tsv", args.dir / "data/self-training/dev_EN.tsv",
+                            args.dir / "data/self-training/val_EN.tsv")
         shutil.copyfile(cfg.preprocess.path / "test_EN.tsv", args.dir / "data/tri-1/test_EN.tsv")
         copy_split_half_tsv(cfg.preprocess.path / "dev_EN.tsv", args.dir / "data/tri-1/dev_EN.tsv", args.dir / "data/tri-1/val_EN.tsv")
         shutil.copyfile(cfg.preprocess.path / "test_EN.tsv", args.dir / "data/tri-2/test_EN.tsv")
@@ -755,9 +1066,11 @@ def prepare_data(args):
     with open(cfg.preprocess.path / "train_EN.tsv", 'r') as f:
         lines = f.readlines()
     new_lines = [lines[0]]
+    with open(args.dir / "data/unlabeled.tsv", 'w') as f:
+            f.writelines([new_lines[0]])
     lines = lines[1:]
     rand.shuffle(lines)
-    unlabeled = lines[cfg.preprocess.size:]
+    unlabeled = lines[cfg.preprocess.split:cfg.preprocess.unlabeled]
     if cfg.tritraining.append_unlabeled:
         with open(args.dir / "data/unlabeled.tsv", 'w') as f:
             f.writelines([new_lines[0]] + unlabeled)
@@ -771,6 +1084,9 @@ def prepare_data(args):
 
     for i, t in enumerate(tris):
         #print(*t)
+        if i == 0:
+            with open(args.dir / f"data/self-training/train_EN.tsv", 'w') as f:
+                f.writelines([new_lines[0]] + t)
         with open(args.dir / f"data/tri-{i+1}/train_EN.tsv", 'w') as f:
             f.writelines([new_lines[0]] + t)
 
@@ -781,14 +1097,15 @@ if __name__ == "__main__":
     parser.add_argument('--dir', type=str, required=True, help="Experiment directory where config.yml is located")
     parser.add_argument('--gpus', type=int, required=False, default=1, help="Number of gpus to train on")
     parser.add_argument('--epochs', type=int, required=False, default=1)
+    parser.add_argument('--force_evaluation', action='store_true', required=False, default=False)
     args = parser.parse_args()
     args.dir = Path(args.dir)
-
+    t.multiprocessing.set_sharing_strategy('file_system')
     #DATA PREPARATION
 
     cfg = TriTrainingConfig(args.dir / 'config.yml')
 
-    if not cfg.tritraining.data_prep_done:
+    if not cfg.tritraining.data_prep_done and not args.force_evaluation:
         prepare_data(args)
         cfg.tritraining.data_prep_done = True
         cfg.save()
@@ -797,16 +1114,16 @@ if __name__ == "__main__":
     #TRAIN BASELINE
 
     dir = args.dir
-    if not cfg.tritraining.baseline_done:
+    if not cfg.tritraining.baseline_done and not args.force_evaluation:
         args.dir = args.dir / "baseline"
         args.from_ckpt = False
-        train_BERT(args)
+        train_test_BERT(args)
         cfg.tritraining.baseline_done = True
         cfg.save()
 
     args.dir = dir
 
-    if not cfg.tritraining.generation_done:
+    if not cfg.tritraining.generation_done and not args.force_evaluation:
         generate(args.dir / "data/train_EN.tsv", cfg.preprocess.seed, args.dir / "data/unlabeled.tsv", cfg.preprocess.gen_path, append_to_unlabeled=cfg.tritraining.append_unlabeled)
         cfg.tritraining.generation_done = True
         cfg.save()
@@ -815,7 +1132,12 @@ if __name__ == "__main__":
 
     args.dir = dir
     cfg = TriTrainingConfig(args.dir / 'config.yml')
-    if not cfg.tritraining.tritraining_done:
+    if not cfg.tritraining.tritraining_done and not args.force_evaluation and cfg.tritraining.self_training:
+        self_training(args)
+        cfg = TriTrainingConfig(args.dir / 'config.yml')
+        cfg.tritraining.tritraining_done = True
+        cfg.save()
+    elif not cfg.tritraining.tritraining_done and not args.force_evaluation:
         tri_training(args)
         cfg = TriTrainingConfig(args.dir / 'config.yml')
         cfg.tritraining.tritraining_done = True
@@ -828,9 +1150,13 @@ if __name__ == "__main__":
             shuffle=False,
             num_workers=cfg.train.num_workers
         )
-        models = []
-        for i in range(1, 4):
-            args.dir = dir / f"tri-{i}"
-            models.append(load_model(args))
-        args.dir = dir
-        evaluate_tri_training(args, models, dataset, 'results_tri_training', loader, cfg)
+        if cfg.tritraining.self_training:
+            args.dir = dir / f"self-training"
+            evaluate_BERT(args, loader)
+        else:
+            models = []
+            for i in range(1, 4):
+                args.dir = dir / f"tri-{i}"
+                models.append(load_model(args))
+            args.dir = dir
+            evaluate_tri_training(args, models, dataset, 'results_tri_training', loader, cfg)

@@ -1,0 +1,35 @@
+
+
+BERT:
+  dataset:
+    do_lowercase: false
+  model:
+    name_or_path: '../../bert-large-cased'
+    seqeval_path: 'seqeval.py'
+    patience: 10
+  train:
+    epochs_per_lang: 1000
+
+tri-train:
+  preprocess:
+    path: '../../../data/CoNLLEN/tsv'
+    gen_path: '../../gpt2-large'
+    gpt2_path: '../../gpt2-large'
+    t5_path: '../../google/t5-v1_1-large'
+    seed: [ 1 ]
+    size: 14986
+    split: [14986]
+    method: "combined"
+  tritraining:
+    episodes: 20
+    generation_done: true
+    baseline_done: true
+    append_unlabeled: false
+    generate_episodic: true
+    full_pretrain: true
+    self_training: false
+  model:
+    name_or_path: '../../bert-large-cased/'
+    seqeval_path: 'seqeval.py'
+
+

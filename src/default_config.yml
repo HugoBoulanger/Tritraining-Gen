@@ -40,13 +40,16 @@ BERT:
     # The weight to give to the slot filling loss during training. float. Defaults to 1.
     slot_loss_coeff: 1
     # The number of epochs to train each language. Defaults to 20.
-    epochs_per_lang: 1000
+    epochs_per_lang: 100
     # The number of workers to use for data fetching. Optional, defaults to half the number of processors.
     num_workers: 4
     # Whether to keep checkpoints in disk. Can be deactivated to save disk space. Defaults to True.
     keep_checkpoints: true
     # The languages to train the model on.
     languages: [ 'EN' ]
+    # Whether to keep training the model or not
+    keep_training: true
+
 
 tri-train:
   preprocess:
@@ -62,23 +65,45 @@ tri-train:
     split: 50
     # Generator path
     gen_path:
+    # GPT 2 path for generation at every step
+    gpt2_path:
+    # T5 path for generation at every step
+    t5_path:
+    # Method of generation
+    method:
+    # How many sentence to generate per initial sentences during generation process
+    num_generated: 5
 
   tritraining:
+    # Whether to work with the natural unlabeled set.
     append_unlabeled: false
+    # Whether the preparation of data (copy of files, etc...) is done
     data_prep_done : false
+    # Whether tritraining has finished training (used to continue experiments that were stopped prematurely)
     tritraining_done : false
+    # Whether training the baseline is done (can be used to avoid training a baseline)
     baseline_done : false
+    # If static generation, whether it has been
     generation_done : false
+    # Whether pretraining has been done.
     pretrain_done : false
+    # Whether to generate at each episode
+    generate_episodic: false
+    # full_pretrain : false for pretraining on sampled set, true for a round of pretraining on sampled + a round of pretraining on full dataset
+    full_pretrain: false
+    # number of the current episode
     current_episode: 0
+    # number of the current tritraining model to train
     current_tri: 1
     # Number of episodes
     episodes: 20
+    self_training: false
 
   model:
     # Model name (huggingface) or path to model checkpoint directory to load the model and tokenizer.
     # If it's a name, it will download the checkpoint from huggingface.co
     name_or_path:
+    # Path to the seqeval path
     seqeval_path:
 
   dataset:

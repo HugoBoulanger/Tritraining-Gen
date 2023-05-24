@@ -9,30 +9,6 @@ from seqeval.metrics import classification_report
 
 # MIT License
 #
-# Copyright (c) 2022 Université Paris-Saclay
-# Copyright (c) 2022 Laboratoire Interdisciplinaire des Sciences du Numérique (LISN)
-# Copyright (c) 2022 CNRS
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-# MIT License
-#
 # Copyright (c) 2021 Université Paris-Saclay
 # Copyright (c) 2021 Laboratoire national de métrologie et d'essais (LNE)
 # Copyright (c) 2021 CNRS
@@ -58,6 +34,26 @@ from seqeval.metrics import classification_report
 from dataset import LabelEncoding
 
 UNIQUE_RUN_ID = str(uuid.uuid4())
+
+
+def correct_tags(tags):
+    nt = []
+    for t in tags:
+        if len(nt) > 0:
+            if t[0] == 'I' and (nt[-1] == 'O' or nt[-1][1:] != t[1:]):
+                nt.append('B'+t[1:])
+            else:
+                nt.append(t)
+        elif len(nt) == 0 and t[0] == 'I':
+            nt.append('B'+t[1:])
+        else:
+            nt.append(t)
+    return nt
+
+def length_test(list1, list2):
+    if len(list1) != len(list2):
+        print(f"Warning. Different length between text sequence and tags.\nIncompatible length: l1 {len(list1)}, l2 {len(list2)}\nL1: {list1}\nL2: {list2}", file=sys.stderr)
+
 
 
 def cat_labels(old: List[torch.TensorType], new: List[torch.TensorType]) -> List[torch.TensorType]:
@@ -102,10 +98,10 @@ class SlotF1(Metric):
             Slot filling ground truth per token encoded as integers.
         """
         # Get hard predictions
-        predictions = torch.argmax(predictions, dim=-1)
+        predictions = torch.argmax(predictions.detach(), dim=-1)
         # Transform to list since it needs to deal with different sequence lengths
         predictions = [p.to('cpu') for p in predictions]
-        targets = [t.to('cpu') for t in targets]
+        targets = [t.detach().to('cpu') for t in targets]
         # Remove ignored predictions (special tokens and possibly subtokens)
 
         # Add predictions and labels to current state
@@ -116,14 +112,17 @@ class SlotF1(Metric):
         """
         Compute the Slot F1 score using the current state.
         """
-        true_predictions = [
-            [self.encoding.get_slot_label_name(p.to('cpu').item()) for (p, l) in zip(pred, label) if l.to('cpu').item() != self.ignore_index]
+        true_predictions = [correct_tags(
+            [self.encoding.get_slot_label_name(p.to('cpu').item()) for (p, l) in zip(pred, label) if l.to('cpu').item() != self.ignore_index])
             for pred, label in zip(self.predictions, self.targets)
         ]
         true_targets = [
             [self.encoding.get_slot_label_name(l.to('cpu').item()) for (p, l) in zip(pred, label) if l.to('cpu').item() != self.ignore_index]
             for pred, label in zip(self.predictions, self.targets)
         ]
+
+        for i in range(len(true_targets)):
+            length_test(true_targets[i], true_predictions[i])
 
         results = self.seqeval.compute(predictions=true_predictions, references=true_targets)
         # overall_precision, overall_recall and overall_accuracy are also available

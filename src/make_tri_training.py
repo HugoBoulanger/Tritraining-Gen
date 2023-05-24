@@ -1,28 +1,3 @@
-# MIT License
-#
-# Copyright (c) 2022 Université Paris-Saclay
-# Copyright (c) 2022 Laboratoire Interdisciplinaire des Sciences du Numérique (LISN)
-# Copyright (c) 2022 CNRS
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 import yaml
 import argparse
 import shutil
@@ -91,6 +66,8 @@ def make_one_directory(path, default_configs, edits):
         ed_dict['BERT']['dataset']['path'] = Path(f'../data/tri-{i}')
         make_training(path / f'tri-{i}', default_configs['BERT'], ed_dict['BERT'])
 
+
+
     print(f"Making {path}/config.yml")
     def_dict = copy.deepcopy(default_configs)
     ed_dict['tri-train']['dataset'] = {}
@@ -98,6 +75,10 @@ def make_one_directory(path, default_configs, edits):
     merge_dicts(def_dict['tri-train'], ed_dict['tri-train'])
     cfg_w = Box(def_dict)
     cfg_w['tri-train'].to_yaml(filename=path / 'config.yml')
+    if cfg_w['tri-train']['tritraining']['self_training']:
+        ed_dict['BERT']['dataset'] = {}
+        ed_dict['BERT']['dataset']['path'] = Path(f'../data/self-training')
+        make_training(path / f'self-training', default_configs['BERT'], ed_dict['BERT'])
     print(f"Ok")
 
 def loop_on_variables(path_to_exproot, path_from_exproot, default_configs, edits):

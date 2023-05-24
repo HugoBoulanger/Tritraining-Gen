@@ -1,24 +1,18 @@
 #!/bin/bash
 #SBATCH -C v100-32g
 #SBATCH --gres=gpu:1
-#SBATCH --mem=24G
-#SBATCH --array=0-49
+#SBATCH --mem=40G
+#SBATCH --array=0-279
 
-for p in ../examples/deeplo_conll_avg/logs/*
+for p in ../examples/*/conll*/logs/*
 do
   for pp in ${p}/*
   do
-    args+=("--dir ${pp} --epochs 100")
+    args+=("--dir ${pp} --epochs 1000")
   done
 done
 
-for p in ../examples/deeplo_conll_small/logs/*
-do
-  for pp in ${p}/*
-  do
-    args+=("--dir ${pp} --epochs 100")
-  done
-done
+
 
 set -x
 

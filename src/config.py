@@ -1,29 +1,5 @@
 # MIT License
 #
-# Copyright (c) 2022 Université Paris-Saclay
-# Copyright (c) 2022 Laboratoire Interdisciplinaire des Sciences du Numérique (LISN)
-# Copyright (c) 2022 CNRS
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-# MIT License
-#
 # Copyright (c) 2021 Université Paris-Saclay
 # Copyright (c) 2021 Laboratoire national de métrologie et d'essais (LNE)
 # Copyright (c) 2021 CNRS
@@ -149,10 +125,16 @@ class TriTrainingConfig:
         self.preprocess.path = file.parent / Path(self.preprocess.path)
         self.dataset.path = file.parent / Path(self.dataset.path)
         self.preprocess.gen_path = file.parent / Path(self.preprocess.gen_path)
+        self.preprocess.gpt2_path = file.parent / Path(self.preprocess.gpt2_path)
+        self.preprocess.t5_path = file.parent / Path(self.preprocess.t5_path)
+
         if (file.parent / Path(self.model.name_or_path)).exists():
             self.model.name_or_path = file.parent / Path(self.model.name_or_path)
 
         self.train.num_workers = getattr(self.train, "num_workers", None)
+
+        self_training = getattr(self.tritraining, "self_training", None)
+        self.tritraining.self_training = self_training if self_training is not None else False
 
         append_unlabeled = getattr(self.tritraining, "append_unlabeled", None)
         self.tritraining.append_unlabeled = append_unlabeled if append_unlabeled is not None else False

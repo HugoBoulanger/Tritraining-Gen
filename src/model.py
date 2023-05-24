@@ -1,29 +1,5 @@
 # MIT License
 #
-# Copyright (c) 2022 Université Paris-Saclay
-# Copyright (c) 2022 Laboratoire Interdisciplinaire des Sciences du Numérique (LISN)
-# Copyright (c) 2022 CNRS
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-# MIT License
-#
 # Copyright (c) 2021 Université Paris-Saclay
 # Copyright (c) 2021 Laboratoire national de métrologie et d'essais (LNE)
 # Copyright (c) 2021 CNRS
@@ -267,6 +243,16 @@ class MultiBERTForNLU(pl.LightningModule):
         if self.cfg.train.do_intent_detection:
             perf["intent_accuracy"] = self.test_intent_acc.compute()  # torch.Tensor
         self.log('test_f1', slot_perf['f1'])
+
+    def predict_step(self, batch: Dict, batch_idx: int):
+        new_preds = self.forward(batch).get_predictions(log=False)[0]
+        values, indices = torch.max(new_preds, dim=2)
+        align = torch.clip(batch['slot_labels'], max=0)
+        indices = indices + align
+        values = list(values.to('cpu').numpy())
+        indices = list(indices.to('cpu').numpy())
+        nex = [[(values[i][j], indices[i][j]) for j in range(len(values[i]))] for i in range(len(values))]
+        return nex
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)

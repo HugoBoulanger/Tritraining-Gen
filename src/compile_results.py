@@ -1,27 +1,3 @@
-# MIT License
-#
-# Copyright (c) 2022 Université Paris-Saclay
-# Copyright (c) 2022 Laboratoire Interdisciplinaire des Sciences du Numérique (LISN)
-# Copyright (c) 2022 CNRS
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 import pandas as pd
 import argparse
 import numpy as np
@@ -45,9 +21,9 @@ def make_latex_table(ar, title, axes, std_ar=None, sign=False):
     for i in range(len(ar)):
         tab += f"{axes[0][i]}"
         for j in range(len(ar[i])):
-            tab += f" & {'+' if ar[i][j] > 0 and sign else ''}{100 * ar[i][j]:.2f}"
+            tab += f" & {'+' if ar[i][j] > 0 and sign else ''}{100 * ar[i][j]:.1f}"
             if std_ar is not None:
-                tab += f"$\pm{100* std_ar[i][j]:.2f}$"
+                tab += f"$\pm{100* std_ar[i][j]:.1f}$"
         tab += " \\\\ \n"
     return tab
 
@@ -66,7 +42,7 @@ if __name__ == "__main__":
     baseline = np.ma.masked_all((len(l), len(c)), dtype=float)
     tritrain = np.ma.masked_all((len(l), len(c)), dtype=float)
     uniques = np.ma.masked_all((len(l)*3, len(c)), dtype=float)
-
+    self_training = np.ma.masked_all((len(l), len(c)), dtype=float)
 
     for il, s in enumerate(l):
         for ic, sp in enumerate(c):
@@ -91,6 +67,11 @@ if __name__ == "__main__":
                 uniques[3*il+2][ic] = un3
             except Exception as ex:
                 print(ex)
+            try:
+                st = get_f1_from_csv(p / 'self-training/logs/slot_filling_report_test_EN.csv')
+                self_training[il][ic] = st
+            except Exception as ex:
+                print(ex)
 
     delta = tritrain - baseline
 
@@ -98,6 +79,12 @@ if __name__ == "__main__":
     std_delta_u = [np.ma.std(delta_u, axis=0)]
     avg_delta_u = [np.ma.average(delta_u, axis=0)]
     avg_uniques = [np.ma.average(uniques, axis=0)]
+
+    delta_st = self_training - baseline
+    std_delta_st = [np.ma.std(delta_st, axis=0)]
+    avg_delta_st = [np.ma.average(delta_st, axis=0)]
+    avg_st = [np.ma.average(self_training, axis=0)]
+    std_st = [np.ma.std(self_training, axis=0)]
 
     std_delta = [np.ma.std(delta, axis=0)]
     avg_delta = [np.ma.average(delta, axis=0)]
@@ -114,15 +101,20 @@ if __name__ == "__main__":
     d_table = make_latex_table(delta, 'delta', [l, c])
     b_table = make_latex_table(baseline, 'baseline', [l, c])
     t_table = make_latex_table(tritrain, 'tritrain', [l, c])
+    st_table = make_latex_table(self_training, 'self-training', [l, c])
+    dst_table = make_latex_table(delta_st, 'self-training delta', [l, c])
 
     d_avg_table = make_latex_table(avg_delta, 'delta average', [["avg"], c], std_ar=std_delta, sign=True)
     b_avg_table = make_latex_table(avg_baseline, 'baseline average', [["avg"], c], std_ar=std_baseline)
+    t_avg_table = make_latex_table(avg_tritrain, 'tritrain average', [["avg"], c], std_ar=std_tritrain)
+    st_avg_table = make_latex_table(avg_st, 'self-training average', [["avg"], c], std_ar=std_st)
+    dst_avg_table = make_latex_table(avg_delta_st, 'self-training delta average', [["avg"], c], std_ar=std_delta_st, sign=True)
 
     u_avg_table = make_latex_table(avg_uniques, 'tritrain unique models average', [['avg'], c])
     du_avg_table = make_latex_table(avg_delta_u, 'tritrain unique models delta with baseline average', [['avg'], c], std_ar=std_delta_u, sign=True)
 
     with open(Path(args.dir) / 'results.txt', 'w') as f:
-        f.write(b_table + b_avg_table + t_table + d_table + d_avg_table + u_avg_table + du_avg_table)
+        f.write(b_table + b_avg_table + t_table + t_avg_table + d_table + d_avg_table + u_avg_table + du_avg_table + st_table + st_avg_table + dst_table + dst_avg_table)
 
     fig = plt.figure(figsize=(6, 4.5))
 
