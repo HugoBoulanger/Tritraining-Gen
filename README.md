@@ -1,12 +1,29 @@
 # Generating unlabelled data for a tri-training approach in a low resourced NER task
-Companion repository for the paper "Generating unlabelled data for a tri-training approach in a low resourced NER task".
+Companion repository for the papers "Generating unlabelled data for a tri-training approach in a low resourced NER task" and "Tri-apprentissage génératif : génération de données pour de la
+reconnaissance d’entitées nommées semi-supervisé".
+Link to the repository with Deeplo 2022 code : https://github.com/HugoBoulanger/Tritraining-Gen/tree/26ecbd5bfc84d485020114ab16ce010584355e6c
+
 
 This project contains all the scripts and information needed to reproduce the experiments presented in the paper.
 
 ## Citation
 
 ```bibtex
+Paper accepted at TALN 2023.
+
+
+
 Paper accepted at Deeplo 2022.
+
+@inproceedings{boulanger2022generating,
+  title={Generating unlabelled data for a tri-training approach in a low resourced NER task},
+  author={Boulanger, Hugo and Lavergne, Thomas and Rosset, Sophie},
+  booktitle={Third Workshop on Deep Learning for Low-Resource Natural Language Processing},
+  pages={30--37},
+  year={2022},
+  organization={Association for Computational Linguistics}
+}
+
 ```
 
 ## Installation
