@@ -11,7 +11,15 @@ This project contains all the scripts and information needed to reproduce the ex
 ```bibtex
 Paper accepted at TALN 2023.
 
-
+@inproceedings{boulanger2023tri,
+  title={Tri-apprentissage g{\'e}n{\'e}ratif: g{\'e}n{\'e}ration de donn{\'e}es pour de la reconnaissance d'entit{\'e}es nomm{\'e}es semi-supervis{\'e}},
+  author={Boulanger, Hugo and Lavergne, Thomas and Rosset, Sophie},
+  booktitle={CORIA-TALN 2023 30e Conf{\'e}rence sur le Traitement Automatique des Langues Naturelles (TALN)},
+  volume={1},
+  pages={68--79},
+  year={2023},
+  organization={ATALA}
+}
 
 Paper accepted at Deeplo 2022.
 
